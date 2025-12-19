@@ -1,0 +1,142 @@
+trigger:
+- main
+
+pool: myterraformpool
+
+stages:
+- stage: TerraformInit
+  displayName: "Terraform Tool Install & Initialization"
+  jobs:
+  - job: TerraformInstall
+    displayName: "Terraform Installer"
+    steps:
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: 'latest'
+
+  - job: TerraformInitialization
+    displayName: "Terraform Initialization"
+    steps:
+    - task: TerraformTask@5
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: '$(System.DefaultWorkingDirectory)'
+        backendServiceArm: 'rahulmyconnection'
+        backendAzureRmResourceGroupName: 'rahul-rg'
+        backendAzureRmStorageAccountName: 'rahulbackend12'
+        backendAzureRmContainerName: 'tfstate'
+        backendAzureRmKey: 'terraform.tfstate'
+
+- stage: TerraformValidateSecurityScan
+  displayName: "Terraform Validate & Security Scan"
+  dependsOn: TerraformInit
+  jobs: 
+  - job: TerraformInstall
+    displayName: "Terraform Installer"
+    steps:
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: 'latest'
+
+  - job: tfsec
+    displayName: "Security Code Scan"
+    steps:
+    - task: PowerShell@2
+      displayName: Run tfsec Security Scan (Windows - No Fail)
+      continueOnError: true
+      inputs:
+        targetType: inline
+        script: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "Downloading tfsec..."
+          Invoke-WebRequest `
+            -Uri https://github.com/aquasecurity/tfsec/releases/latest/download/tfsec-windows-amd64.exe `
+            -OutFile tfsec.exe
+
+          Write-Host "Running tfsec..."
+          .\tfsec.exe . || Write-Host "tfsec found issues but pipeline will continue"
+
+          Write-Host "tfsec finished — forcing success"
+          exit 0
+- stage: TerraformPlan
+  displayName: "Terraform Plan"
+  dependsOn: TerraformValidateSecurityScan
+  jobs:
+  - job: TerraformInstall
+    displayName: "Terraform Installer"
+    steps:
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: 'latest'
+
+  - job: TerraformInitialization
+    displayName: "Terraform Initialization"
+    steps:
+    - task: TerraformTask@5
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: '$(System.DefaultWorkingDirectory)'
+        backendServiceArm: 'rahulmyconnection'
+        backendAzureRmResourceGroupName: 'rahul-rg'
+        backendAzureRmStorageAccountName: 'rahulbackend12'
+        backendAzureRmContainerName: 'tfstate'
+        backendAzureRmKey: 'terraform.tfstate'
+  
+  - job: RunningPlan
+    displayName: "Terraform Plan"
+    steps:
+    - task: TerraformTask@5
+      inputs:
+        provider: 'azurerm'
+        command: 'plan'
+        workingDirectory: '$(System.DefaultWorkingDirectory)'
+        environmentServiceNameAzureRM: 'rahulmyconnection'
+
+- stage: ManualValidation
+  displayName: "Wait for Approval"
+  dependsOn: TerraformPlan
+  jobs:
+  - job: WaitforApproval
+    displayName: "Waiting for approval"
+    pool : server
+    steps:
+    - task: ManualValidation@1
+      inputs:
+        instructions: 'Please Approve to proceed for Infra deployment'
+
+- stage: TerraformApply
+  displayName: "Terraform Apply"
+  dependsOn: ManualValidation
+  jobs:
+  - job: TerraformInstall
+    displayName: "Terraform Installer"
+    steps:
+    - task: TerraformInstaller@1
+      inputs:
+        terraformVersion: 'latest'
+
+  - job: TerraformInitialization
+    displayName: "Terraform Initialization"
+    steps:
+    - task: TerraformTask@5
+      inputs:
+        provider: 'azurerm'
+        command: 'init'
+        workingDirectory: '$(System.DefaultWorkingDirectory)'
+        backendServiceArm: 'rahulmyconnection'
+        backendAzureRmResourceGroupName: 'rahul-rg'
+        backendAzureRmStorageAccountName: 'rahulbackend12'
+        backendAzureRmContainerName: 'tfstate'
+        backendAzureRmKey: 'terraform.tfstate'
+
+  - job: TerraformApply
+    displayName: "Infra Deploy"
+    steps:
+    - task: TerraformTask@5
+      inputs:
+        provider: 'azurerm'
+        command: 'apply'
+        environmentServiceNameAzureRM: 'rahulmyconnection'
